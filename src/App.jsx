@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import PosMainPage from './pages/PointOfSale'
+import PosMainPageNew from './pages/PointOfSaleNew'
 import './App.css'
 import Sidebar from './components/Sidebar'
 
@@ -9,7 +9,7 @@ function App() {
   const renderContent = () => {
     switch (active) {
       case 'pos':
-        return <PosMainPage />
+        return <PosMainPageNew />
       default:
         return <div>Hello</div>
     }
