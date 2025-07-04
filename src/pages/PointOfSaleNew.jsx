@@ -28,6 +28,7 @@ import {
     getDocs,
     doc,
     updateDoc,
+    addDoc,
     query,
     where,
     orderBy,
@@ -52,6 +53,7 @@ const PointOfSaleNew = () => {
     const [paymentStep, setPaymentStep] = useState('waiting');
     const [customerName, setCustomerName] = useState('Customer Name');
     const [orderType, setOrderType] = useState('Dine in');
+    const [transactionStatus, setTransactionStatus] = useState(null); // 'pending' | 'success' | null
 
     // Fetch categories from Firebase
     useEffect(() => {
@@ -122,6 +124,19 @@ const PointOfSaleNew = () => {
         }
         return () => clearTimeout(timer);
     }, [showPaymentModal, paymentStep]);
+
+    // Effect to handle showing receipt modal after success illustration
+    useEffect(() => {
+        let timer;
+        if (showPaymentModal && transactionStatus === 'success') {
+            timer = setTimeout(() => {
+                setShowPaymentModal(false);
+                setShowReceiptModal(true);
+                setTransactionStatus(null);
+            }, 2000);
+        }
+        return () => clearTimeout(timer);
+    }, [showPaymentModal, transactionStatus]);
 
     const handleProductClick = (product) => {
         setSelectedItem({
@@ -228,8 +243,38 @@ const PointOfSaleNew = () => {
             await updateStock(item.id, item.quantity);
         }
 
-        setShowPaymentModal(true);
-        setPaymentStep('waiting');
+        // Prepare transaction data
+        const transactionData = {
+            items: cart,
+            customerName,
+            orderType,
+            total: calculateTotal(),
+            subtotal: calculateSubtotal(),
+            tipServer: calculateTax(calculateSubtotal(), 0.03),
+            pajakRestoran: calculateTax(calculateSubtotal(), 0.10),
+            ppn: calculateTax(calculateSubtotal(), 0.10),
+            status: 'pending',
+            createdAt: new Date(),
+        };
+
+        // Add transaction to Firestore
+        let transactionRef;
+        try {
+            transactionRef = await addDoc(collection(db, 'transactions'), transactionData);
+            setShowPaymentModal(true);
+            setPaymentStep('waiting');
+            setTransactionStatus('pending');
+
+            // After 20 seconds, update the status to 'success'
+            setTimeout(async () => {
+                await updateDoc(doc(db, 'transactions', transactionRef.id), {
+                    status: 'success'
+                });
+                setTransactionStatus('success');
+            }, 20000);
+        } catch (err) {
+            console.error('Error adding transaction:', err);
+        }
     };
 
     const formatPrice = (price) => {
@@ -610,9 +655,9 @@ const PointOfSaleNew = () => {
             {/* Payment Modal */}
             {showPaymentModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-lg p-8 w-full max-w-md">
+                    <div className="bg-white rounded-lg p-8 w-full max-w-md text-center">
                         <div className="flex justify-between items-center mb-6">
-                            <h2 className="text-lg font-bold text-center">Payment</h2>
+                            <h2 className="text-lg font-bold text-center">PAYMENT</h2>
                             <button
                                 onClick={() => setShowPaymentModal(false)}
                                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -620,17 +665,119 @@ const PointOfSaleNew = () => {
                                 <X size={20} />
                             </button>
                         </div>
-
-                        <div className="mb-6">
-                            <h3 className="font-medium mb-3">Payment Method</h3>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button className="p-3 rounded-lg transition-colors bg-blue-600 text-white">
-                                    Cash
-                                </button>
-                                <button className="p-3 rounded-lg transition-colors bg-blue-600 text-white">
-                                    Credit Card
-                                </button>
+                        <div className="mb-8">
+                            <h3 className="text-xl font-bold mb-2">Total Payment</h3>
+                            <div className="text-2xl font-bold text-gray-800">{formatPrice(calculateTotal())}</div>
+                        </div>
+                        <div className="mb-8 relative flex items-center justify-center min-h-[100px]">
+                            {/* Payment Device Illustration (pending) or Success Illustration (success) */}
+                            {transactionStatus === 'pending' && (
+                                <div className="w-32 h-20 mx-auto mb-4 bg-gray-400 rounded-lg relative">
+                                    <div className="absolute top-2 left-2 w-8 h-6 bg-white rounded"></div>
+                                    <div className="absolute top-2 right-2 w-4 h-4 bg-green-500 rounded-full"></div>
+                                    {/* Hand Illustration */}
+                                    <div className="absolute -top-4 right-20">
+                                        <div className="w-12 h-8 bg-yellow-200 rounded-full transform rotate-12"></div>
+                                    </div>
+                                </div>
+                            )}
+                            {transactionStatus === 'success' && (
+                                <div className="w-32 h-20 mx-auto mb-4 bg-gray-400 rounded-lg relative">
+                                    <div className="absolute top-2 left-2 w-8 h-6 bg-white rounded"></div>
+                                    <div className="absolute top-2 right-2 w-4 h-4 bg-green-500 rounded-full"></div>
+                                    {/* Success Check */}
+                                    <div className="absolute -bottom-2 right-16">
+                                        <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                                            <Check className="text-white" size={16} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <p className="text-gray-500">
+                            {transactionStatus === 'pending'
+                                ? 'Waiting for your customer to scan their palm to make a payment'
+                                : transactionStatus === 'success'
+                                    ? 'Payment Success!'
+                                    : ''}
+                        </p>
+                    </div>
+                </div>
+            )}
+            {/* Receipt Modal (from PointOfSale.jsx) */}
+            {showReceiptModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-96 max-w-full mx-4">
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <Check className="text-white" size={24} />
                             </div>
+                            <h2 className="text-lg font-bold text-green-600">Transaction Success!</h2>
+                        </div>
+                        {/* Receipt */}
+                        <div className="bg-white border-2 border-dashed border-gray-200 p-4 rounded-lg">
+                            <div className="text-center border-b border-gray-200 pb-4 mb-4">
+                                <div className="text-sm text-gray-500">{getCurrentDateTime().date}</div>
+                                <div className="text-sm text-gray-500">{getCurrentDateTime().time}</div>
+                                <div className="flex justify-between text-sm mt-2">
+                                    <span>Receipt Number</span>
+                                    <span>3RMNW3N</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span>Customer</span>
+                                    <span>{customerName}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span>Cashier</span>
+                                    <span>Ella Watson</span>
+                                </div>
+                            </div>
+                            <div className="text-center font-medium mb-4">{orderType}</div>
+                            <div className="space-y-2 mb-4">
+                                {cart.map((item, idx) => (
+                                    <div key={item.id + '-' + idx} className="flex justify-between text-sm">
+                                        <span>{item.name}</span>
+                                        <div className="flex space-x-4">
+                                            <span>x {item.quantity}</span>
+                                            <span>{formatPrice(item.price * item.quantity)}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="border-t border-gray-200 pt-2 space-y-1">
+                                <div className="flex justify-between">
+                                    <span>Subtotal:</span>
+                                    <span>{formatPrice(calculateSubtotal())}</span>
+                                </div>
+                                <div className="flex justify-between text-sm text-gray-500">
+                                    <span>Tip Server (3%)</span>
+                                    <span>{formatPrice(calculateTax(calculateSubtotal(), 0.03))}</span>
+                                </div>
+                                <div className="flex justify-between text-sm text-gray-500">
+                                    <span>Pajak Restoran (10%)</span>
+                                    <span>{formatPrice(calculateTax(calculateSubtotal(), 0.10))}</span>
+                                </div>
+                                <div className="flex justify-between text-sm text-gray-500">
+                                    <span>PPN (10%)</span>
+                                    <span>{formatPrice(calculateTax(calculateSubtotal(), 0.10))}</span>
+                                </div>
+                                <div className="flex justify-between font-bold border-t border-gray-200 pt-2">
+                                    <span>Total:</span>
+                                    <span>{formatPrice(calculateTotal())}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex space-x-3 mt-6">
+                            <button className="flex-1 flex items-center justify-center space-x-2 py-3 border border-gray-200 text-blue-500 rounded-lg">
+                                <Share size={16} />
+                                <span>Send Receipt</span>
+                            </button>
+                            <button
+                                onClick={() => setShowReceiptModal(false)}
+                                className="flex-1 py-3 bg-blue-600 text-white rounded-lg"
+                            >
+                                Done
+                            </button>
                         </div>
                     </div>
                 </div>
